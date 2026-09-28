@@ -60,5 +60,5 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new "$USUARIO@$HOST" \
             'cd /srv/app && docker compose pull && docker compose up -d'
   
-    api:
-    image: ghcr.io/christopherfall/app-deploy-docker:sha-a1b2c3d
+  api:
+  image: ghcr.io/christopherfall/app-deploy-docker:sha-a1b2c3d
