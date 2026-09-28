@@ -41,3 +41,24 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha          
           cache-to: type=gha,mode=max
+
+  desplegar:
+    needs: construir-y-publicar
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: produccion     # permite exigir aprobacion humana
+    steps:
+      - name: Actualizar los contenedores del servidor
+        env:
+          SSH_KEY: ${{ secrets.SERVIDOR_SSH_KEY }}
+          HOST:    ${{ secrets.SERVIDOR_HOST }}
+          USUARIO: ${{ secrets.SERVIDOR_USUARIO }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=accept-new "$USUARIO@$HOST" \
+            'cd /srv/app && docker compose pull && docker compose up -d'
+  
+    api:
+    image: ghcr.io/christopherfall/app-deploy-docker:sha-a1b2c3d
