@@ -53,16 +53,91 @@ Siga las instrucciones específicas para su sistema operativo hasta levantar la 
 ### Opción A: Instalación en Windows
 
 #### Paso 1: Habilitar WSL 2
-Abra PowerShell como Administrador y ejecute:
-```powershell
-wsl --install
+1. Preparar el motor de WSL. Abra PowerShell como Administrador (clic derecho sobre el menú Inicio  → Terminal (Administrador)). Antes de pensar en Ubuntu, deje instalado y actualizado el motor del subsistema:
 ```
+winver                           # la version de Windows debe ser 2004 o superior
+wsl --version                    # si responde "parametro no valido", su WSL es antiguo
+wsl --install --no-distribution  # instala/actualiza SOLO el motor, sin distribucion
+wsl --update                     # trae la version de la Store, con el catalogo moderno
+wsl --shutdown
+wsl --set-default-version 2
+```
+***La clave está en --no-distribution: instala el motor moderno de WSL sin intentar descargar todavía ninguna distribución, que es justo el punto donde se rompe el comando de un solo paso.***
+Si `wsl -version` respondió que el parámetro no es válido, su equipo traía la versión antigua del subsistema; después de estos comandos ya tendrá la actual.
+
+2. Confirmar el nombre exacto de la distribución, antes de instalarla. 
+Todavía en PowerShell como Administrador:
+`wsl --list --online`
+***Verifique: en la columna NAME debe aparecer Ubuntu-24.04. Si el paso 1 se ejecutó completo, el nombre ya está en la lista.***
+No pase al paso siguiente sin haberlo visto.
+
+3. Instalar Ubuntu. En la misma ventana de PowerShell como Administrador:
+`wsl --install -d Ubuntu-24.04 --web-download`
+El modificador `--web-download` descarga la distribución desde los servidores de Microsoft en lugar de la Microsoft Store. Es necesario en equipos de sala o corporativos, donde la Store suele estar deshabilitada por política del equipo, o no hay una cuenta Microsoft iniciada.
+***Reinicie el equipo si el sistema se lo solicita.***
+
+4. Primer arranque de Ubuntu. 
+Este paso se hace una sola vez, y es donde más se traba quien nunca ha usado una terminal.
+ - Espere la ventana negra. Al terminar la descarga se abre sola una ventana con el texto 
+**Installing, this may take a few minutes....** 
+Puede tardar varios minutos. No la cierre. Si por accidente la cierra, abra Ubuntu desde el menú Inicio y el proceso continúa donde iba.
+ - Cree el usuario de Linux. Cuando la instalación termina, aparece el texto 
+`Enter new UNIX username:`. Escriba un nombre en minúsculas, sin espacios, sin tildes y sin ñ y pulse Enter. No tiene que ser el mismo usuario con el que entra a Windows.
+ - Cree la contraseña. Aparece `New password:`. Escriba una contraseña y pulse Enter aunque en la pantalla no se vea absolutamente nada.
+ - Repítala. Aparece `Retype new password:`. Escriba exactamente la misma y pulse Enter. Si responde `Sorry, passwords do not match`, simplemente vuelve a pedirla desde el principio.
+
+5. Confirmar que la distribución quedó en WSL 2. De vuelta en PowerShell:
+`wsl --list --verbose`
+Verifique: la línea de Ubuntu-24.04 debe mostrar VERSION 2. Si muestra VERSION 1, conviértala con `wsl -set-version Ubuntu-24.04 2` y espere a que termine. Sobre WSL 1 no hay núcleo Linux real y Docker Engine no funcionará.
+
+6. Habilitar systemd, que es el que administrará el servicio de Docker. Abra Ubuntu desde el menú Inicio y ejecute:
+```sudo tee /etc/wsl.conf > /dev/null <<EOF
+[boot]
+systemd=true
+EOF
+```
+Cierre la ventana de Ubuntu y, desde PowerShell, reinicie el subsistema:
+`wsl --shutdown`
+Vuelva a abrir Ubuntu desde el menú Inicio y compruebe que systemd está activo:
+`systemctl is-system-running`   # debe responder running o degraded, no offline
 *Reinicie el sistema si la consola se lo solicita.*
 
-#### Paso 2: Instalar Docker Desktop
-1. Descargue el instalador de Docker Desktop para Windows desde el sitio oficial.
-2. Siga el asistente de instalación asegurándose de marcar la opción **"Use WSL 2 instead of Hyper-V"**.
-3. Inicie Docker Desktop al finalizar y acepte los términos de servicio.
+#### Paso 2: Instalar Docker Engine
+
+1. Retirar paquetes no oficiales que puedan entrar en conflicto
+```
+sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker
+```
+2. Registrar el repositorio oficial de Docker
+```
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+```
+3. Instalar el motor, la CLI y los plugins de Buildx y compose
+```
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+```
+4. Arrancar el servicio y dejarlo habilitado al inicio del sistema
+```
+sudo systemctl enable --now docker
+```
+5. Poder usar docker sin sudo
+```
+sudo usermod -aG docker $USER
+```
 
 #### Paso 3: Clonar el repositorio y ejecutar la solución
 Abra Git Bash, PowerShell o CMD y ejecute:
@@ -82,10 +157,33 @@ docker compose up -d
 
 ### Opción B: Instalación en macOS
 
-#### Paso 1: Instalar Docker Desktop
-1. Descargue el instalador `.dmg` de Docker Desktop correspondiente a su procesador (Intel o Apple Silicon).
-2. Abra el archivo `.dmg` y arrastre la aplicación Docker a la carpeta **Aplicaciones**.
-3. Inicie la aplicación Docker y otorgue los permisos requeridos por el sistema.
+#### Paso 1: Instalar Docker Engine con Colima
+
+ - Instalar Homebrew, si aun no lo tiene
+```
+/bin/bash -c "$(curl -fsSL \
+  https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+ - Instalar el cliente de Docker, el plugin de Compose y Colima
+`brew install docker docker-compose colima`
+
+ - Preparar la carpeta de configuracion del cliente
+`mkdir -p ~/.docker`
+
+ - Crear y arrancar la maquina virtual con Docker Engine dentro
+`colima start --cpu 2 --memory 4 --disk 20`
+
+ - Comprobar el estado de la maquina virtual
+`colima status`
+Falta registrar el plugin de Compose ante el cliente de Docker. Si el archivo `~/.docker/config.json` no existe, créelo con este contenido; si ya existe, agréguele únicamente la clave 
+```
+cliPluginsExtraDirs:
+{
+  "cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]
+}
+```
+Esa es la ruta en Mac con Apple Silicon. En Mac con procesador Intel la ruta es `/usr/local/lib/docker/cli-plugins`. 
+Si tiene dudas, ejecute `brew --prefix` y use el valor que devuelva seguido de `/lib/docker/cli-plugins`.
 
 #### Paso 2: Clonar el repositorio y ejecutar la solución
 Abra la Terminal de macOS y ejecute:
